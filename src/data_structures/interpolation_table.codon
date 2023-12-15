@@ -1,0 +1,62 @@
+from bio import *
+from math import log
+
+
+def ln_1p(x: float) -> float:
+    return log(1 + x)
+
+
+def interpolate(a: float, b: float, fraction: float) -> float:
+    return a * (1.0 - fraction) + b * fraction
+
+
+class InterpolationTable:
+    inner: List[float]
+    func: function[[float], float]
+    offset: int
+    min_x: float
+    max_x: float
+    shift: float
+
+    def __init__(self, min_x: float, max_x: float, frac_digits: int, func: function[[float], float]):
+        self.shift = 10.0 ** frac_digits
+        self.offset = int(min_x * self.shift)
+        self.min_x = min_x
+        self.max_x = max_x
+        self.func = func
+        self.inner = []
+        
+        i = self.index(min_x)
+        while i < self.index(max_x):
+            x = i / self.shift
+            self.inner.append(func(x))
+            i += 1
+
+    def index(self, x: float) -> int:
+        return int(x * self.shift) - self.offset
+
+    def get(self, x: float) -> float:
+        if x < self.min_x or x >= self.max_x:
+            return self.func(x)
+
+        else:
+            i = self.index(x)
+            fraction = (x * self.shift - i) / self.shift
+            return interpolate(self.inner[i], self.inner[i + 1], fraction)
+
+
+def test_interpolation_table():
+    table = InterpolationTable(0.0, 10.0, 5, lambda x: ln_1p(x))
+    test_values = [0.02, 0.04, 0.45678686, 0.23875, 1.45345e-6]
+    epsilon = 0.00001
+
+    for x in test_values:
+        approx = table.get(x)
+        exact = ln_1p(x)
+        assert abs(approx - exact) < epsilon, f"Test failed for x={x}: Approx={approx}, Exact={exact}"
+        
+    print("Test passed")
+
+
+if __name__ == "__main__":
+    test_interpolation_table()

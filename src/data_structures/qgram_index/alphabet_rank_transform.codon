@@ -1,0 +1,207 @@
+class Alphabet:
+    symbols: set[int]
+
+    def __init__(self, symbols: str):
+        self.symbols = set()
+
+        for symbol in symbols:
+            self.symbols.add(ord(symbol))
+
+    def insert(self, symbol: str):
+        self.symbols.add(ord(symbol[0]))
+
+    def is_word(self, text: str) -> bool:
+        return all(ord(c) in self.symbols for c in text)
+
+    def max_symbol(self) -> str:
+        if self.symbols:
+            return chr(max(self.symbols))
+        
+        return ""
+
+    def len(self) -> int:
+        return len(self.symbols)
+
+    def is_empty(self) -> bool:
+        return not self.symbols
+
+    def intersection(self, other: Alphabet) -> Alphabet:
+        common_symbols = self.symbols.intersection(other.symbols)
+
+        return Alphabet("".join(chr(symbol) for symbol in common_symbols))
+
+    def difference(self, other: Alphabet) -> Alphabet:
+        diff_symbols = self.symbols.difference(other.symbols)
+
+        return Alphabet("".join(chr(symbol) for symbol in diff_symbols))
+
+    def union(self, other: Alphabet) -> Alphabet:
+        union_symbols = self.symbols.union(other.symbols)
+
+        return Alphabet("".join(chr(symbol) for symbol in union_symbols))
+    
+
+class QGrams:
+    text: str
+    rank_transform: RankTransform
+    q: int
+    bits: int
+    mask: int
+    qgram: int
+    index: int
+
+    def __init__(self, text: str, rank_transform: RankTransform, q: int):
+        self.text = text
+        self.rank_transform = rank_transform
+        self.q = q
+        self.bits = rank_transform.get_width()
+        self.mask = (1 << (self.bits * q)) - 1
+        self.qgram = 0
+        self.index = 0
+
+    def qgram_push(self, a: str):
+        a_rank = self.rank_transform.get(a)
+        self.qgram = ((self.qgram << self.bits) | a_rank) & self.mask
+
+    def next(self) -> int:
+        if self.index + self.q <= len(self.text):
+            self.qgram = 0  # Reset qgram for each new window
+
+            for i in range(self.q):
+                self.qgram_push(self.text[self.index + i])
+
+            self.index += 1
+
+            return self.qgram
+        
+        return None
+    
+    
+class RankTransform:
+    ranks: dict[int, int]
+
+    def __init__(self, alphabet: Alphabet):
+        self.ranks = {}
+        sorted_symbols = sorted(list(alphabet.symbols))
+
+        for r, symbol in enumerate(sorted_symbols):
+            self.ranks[symbol] = r
+
+    def get(self, a: str) -> int:
+        ascii_value = ord(a)
+        if ascii_value in self.ranks:
+            return self.ranks[ascii_value]
+        
+        else:
+            raise ValueError("Unexpected character.")
+
+    def transform(self, text: str) -> list[int]:
+        return [self.get(c) for c in text]
+    
+    def qgrams(self, q: int, text: str) -> list[int]:
+        # Calculate the number of bits needed for one character
+        bits = self.get_width()
+        assert bits * q <= 32, "q is too large for the alphabet size"
+
+        # Initialize QGrams object
+        qgrams_obj = QGrams(text, self, q)
+
+        # Generate and collect q-grams
+        qgrams = []
+        while True:
+            qgram = qgrams_obj.next()
+
+            if qgram is None:
+                break
+
+            qgrams.append(qgram)
+
+        return qgrams
+
+    def alphabet(self) -> Alphabet:
+        symbols = {chr(symbol) for symbol in self.ranks.keys()}
+        return Alphabet(''.join(sorted(symbols)))
+
+    def get_width(self) -> int:
+        return len(bin(int(len(self.ranks) - 1)))-2
+    
+
+def test_alphabet_equality():
+    alpha1 = Alphabet("ATCG")
+    alpha2 = Alphabet("ATCG")
+    alpha3 = Alphabet("TAGC")
+    alpha4 = Alphabet("ATC")
+
+    assert alpha1.symbols == alpha2.symbols, "Alphabets with same symbols should be equal"
+    assert alpha1.symbols == alpha3.symbols, "Order of symbols should not matter"
+    assert alpha1.symbols != alpha4.symbols, "Alphabets with different symbols should not be equal"
+
+
+def test_alphabet_operations():
+    alpha = Alphabet("ATCG")
+    alpha.insert("N")
+    assert ord("N") in alpha.symbols, "Inserted symbol should be in alphabet"
+
+    assert alpha.is_word("ATCGN"), "Should recognize word from alphabet"
+    assert not alpha.is_word("XYZ"), "Should not recognize word not from alphabet"
+
+
+def test_rank_transform():
+    # Test for basic functionality
+    alphabet = Alphabet("aAcCgGtT")
+    transform = RankTransform(alphabet)
+
+    assert transform.get("A") == 0, "Rank of A should be 0"
+    assert transform.get("C") == 1, "Rank of C should be 1"
+
+    # Test for transformation of a text
+    text = "aAcCgGtT"
+    transformed = transform.transform(text)
+
+    assert transformed == [4, 0, 5, 1, 6, 2, 7, 3], "Transformation of ACTG should be [4, 0, 5, 1, 6, 2, 7, 3]"
+
+    # Test for reconstructing the alphabet
+    reconstructed_alphabet = transform.alphabet()
+    assert reconstructed_alphabet.symbols == alphabet.symbols, "Reconstructed alphabet should match the original"
+
+    alphabet = Alphabet("ACGTN")
+    transform = RankTransform(alphabet)
+    # Test for get_width method
+    width = transform.get_width()
+    assert width == 3, "Width for alphabet ACTG should be 3 bits"
+
+    # Test qgram
+    # Create an alphabet and a rank transform for testing
+    alphabet = Alphabet("ACGT")
+    rank_transform = RankTransform(alphabet)
+
+    # Test case 1: Basic functionality with small q
+    text = "ACGTACGT"
+    q = 2
+    expected_qgrams = [rank_transform.get("AC"), rank_transform.get("CG"), rank_transform.get("GT"),
+                       rank_transform.get("TA"), rank_transform.get("AC"), rank_transform.get("CG"), rank_transform.get("GT")]
+    result_qgrams = rank_transform.qgrams(q, text)
+    assert result_qgrams == expected_qgrams, f"Q-grams of {text} with q={q} should be {expected_qgrams}"
+
+    # Test case 2: Edge case with q equal to text length
+    q = len(text)
+    expected_qgrams = [rank_transform.get(text)]
+    result_qgrams = rank_transform.qgrams(q, text)
+    assert result_qgrams == expected_qgrams, f"Q-grams of {text} with q={q} should be {expected_qgrams}"
+
+    # Test case 3: Edge case with q greater than text length
+    q = len(text) + 1
+    expected_qgrams = []
+    result_qgrams = rank_transform.qgrams(q, text)
+    assert result_qgrams == expected_qgrams, f"Q-grams of {text} with q={q} should be an empty list"
+
+
+def run_tests():
+    test_alphabet_equality()
+    test_alphabet_operations()
+    test_rank_transform()
+    print("All tests passed!")
+
+
+if __name__ == "__main__":
+    run_tests()

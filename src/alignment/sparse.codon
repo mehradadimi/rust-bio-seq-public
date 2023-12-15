@@ -1,0 +1,184 @@
+from bio import *
+
+
+class MaxOp:
+    @staticmethod
+    def operation(t1: Tuple[int, int], t2: Tuple[int, int]) -> Tuple[int, int]:
+        return max(t1, t2)
+
+
+class FenwickTree:
+    tree: List[Tuple[int, int]]
+    Op: MaxOp
+
+    def __init__(self, length: int, Op: MaxOp):
+        self.tree = [(0, 0) for _ in range(length + 1)]
+        self.Op = Op
+
+    def get(self, idx: int) -> Tuple[int, int]:
+        idx += 1
+        result = (0, 0)
+
+        while idx > 0:
+            result = self.Op.operation(result, self.tree[idx])
+            idx -= idx & -idx
+
+        return result
+
+    def set(self, idx: int, val: Tuple[int, int]):
+        idx += 1
+        while idx < len(self.tree):
+            self.tree[idx] = self.Op.operation(self.tree[idx], val)
+            idx += idx & -idx
+
+
+def hash_kmers(seq, k):
+    kmer_hash = {}
+    for i in range(max(len(seq) - k + 1, 0)):
+        kmer = seq[i : i + k]
+
+        if kmer not in kmer_hash:
+            kmer_hash[kmer] = []
+
+        kmer_hash[kmer].append(i)
+
+    return kmer_hash
+
+
+def find_kmer_matches_seq1_hashed(hash1, seq2, k):
+    matches = []
+    for i in range(max(len(seq2) - k + 1, 0)):
+        slc = seq2[i : i + k]
+
+        if slc in hash1:
+            for pos1 in hash1[slc]:
+                matches.append((pos1, i))
+
+    return sorted(matches)
+
+
+def find_kmer_matches_seq2_hashed(hash2, seq1, k):
+    matches = []
+    for i in range(max(len(seq1) - k + 1, 0)):
+        slc = seq1[i : i + k]
+
+        if slc in hash2:
+            for pos1 in hash2[slc]:
+                matches.append((pos1, i))
+
+    return sorted(matches)
+
+
+def find_kmer_matches(seq1, seq2, k):
+    if len(seq1) < len(seq2):
+        hash1 = hash_kmers(seq1, k)
+        return find_kmer_matches_seq1_hashed(hash1, seq2, k)
+
+    else:
+        hash2 = hash_kmers(seq2, k)
+        return find_kmer_matches_seq2_hashed(hash2, seq2, k)
+
+
+class SparseAlignmentResult:
+    path: List[int]
+    score: int
+
+    def __init__(self, path: List[int], score: int):
+        self.path = path
+        self.score = score
+
+
+def binary_search_matches(matches, target):
+    low, high = 0, len(matches) - 1
+
+    while low <= high:
+        mid = (low + high) // 2
+
+        if matches[mid] == target:
+            return mid
+
+        elif matches[mid] < target:
+            low = mid + 1
+
+        else:
+            high = mid - 1
+
+    return -1
+
+
+def lcskpp(matches, k):
+    if not matches:
+        return SparseAlignmentResult([], 0)
+
+    k = int(k)
+    matches = sorted(matches)
+
+    events = []
+    max_n = 0
+
+    for idx, (x, y) in enumerate(matches):
+        events.append((x, y, idx + len(matches)))  # Start of a match
+        events.append((x + k, y + k, idx))  # End of a match
+        max_n = max(max_n, x + k)
+        max_n = max(max_n, y + k)
+
+    events.sort()
+
+    max_col_dp = FenwickTree(max_n, MaxOp())
+    dp = [(0, 0)] * len(events)
+    best_dp = (k, 0)
+
+    for ev in events:
+        p = ev[2] % len(matches)
+        j = ev[1]
+        is_start = ev[2] >= len(matches)
+
+        if is_start:
+            dp[p] = (k, -1)
+            (best_value, best_position) = max_col_dp.get(j)
+
+            if best_value > 0:
+                dp[p] = (k + best_value, best_position)
+                best_dp = max(best_dp, (dp[p][0], p))
+
+        else:
+            if ev[0] > k and ev[1] > k:
+                prev_match_idx = binary_search_matches(
+                    matches, (ev[0] - k - 1, ev[1] - k - 1)
+                )
+
+                if prev_match_idx != -1:
+                    candidate = (dp[prev_match_idx][0] + 1, prev_match_idx)
+                    dp[p] = max(dp[p], candidate)
+                    best_dp = max(best_dp, (dp[p][0], p))
+
+    path = []
+    (score, prev_idx) = best_dp
+
+    while prev_idx != -1:
+        path.append(prev_idx)
+
+        _, prev_idx = dp[prev_idx]
+
+    path.reverse()
+    return SparseAlignmentResult(path, score)
+
+
+def test_sparse():
+    seq1 = "ACGTACGATAGGTA"
+    seq2 = "TTACGTACGATAGGTATT"
+    k = 8
+
+    matches = find_kmer_matches(seq1, seq2, k)
+    result = lcskpp(matches, k)
+
+    match_path = [matches[i] for i in result.path]
+
+    assert match_path == [(0, 2), (1, 3), (2, 4), (3, 5), (4, 6), (5, 7), (6, 8)]
+    assert result.score == 14
+
+    print("All Tests Passed")
+
+
+if __name__ == "__main__":
+    test_sparse()

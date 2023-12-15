@@ -1,0 +1,88 @@
+def create_masks(pattern: str):
+    m = len(pattern)
+    assert m <= 64, "Pattern must be at most 64 characters."
+    masks = {chr(i): 0 for i in range(256)}  # Initialize masks for all characters
+    accept = 1 << (m - 1)
+
+    for i, c in enumerate(reversed(pattern)):
+        masks[c] |= 1 << i
+
+    return masks, accept
+
+
+class BNDM:
+    m: int
+    masks: dict[str, int]
+    accept: int
+
+    def __init__(self, pattern: str):
+        self.m = len(pattern)
+        self.masks, self.accept = create_masks(pattern)
+
+    def find_all(self, text: str) -> list:
+        window = self.m
+        results = []
+
+        while window <= len(text):
+            occ = None
+            active = (1 << self.m) - 1
+            j, lastsuffix = 1, 0
+
+            while active != 0:
+                active &= self.masks[text[window - j]]
+
+                if active & self.accept != 0:
+                    if j == self.m:
+                        occ = window - self.m
+                        break
+
+                    else:
+                        lastsuffix = j
+
+                j += 1
+                active <<= 1
+
+            window += self.m - lastsuffix
+
+            if occ is not None:
+                results.append(occ)
+
+        return results
+
+
+def test_bndm():
+    print('Test 1')
+    print('-')
+    print('Expected: [7, 17]')
+    pattern = "GAAAA"
+    text = "ACGGCTAGAAAAGGCTAGAAAA"
+    bndm = BNDM(pattern)
+    print(f'Result: {bndm.find_all(text)}')
+
+    print('----------')
+
+    print('Test 2')
+    print('-')
+    print('Expected: [8]')
+    pattern = "qnnnannan"
+    text = "dhjalkjwqnnnannanaflkjdklfj"
+    bndm = BNDM(pattern)
+    print(f'Result: {bndm.find_all(text)}')
+
+    print('----------')
+
+    print('Test 3')
+    print('-')
+    print('Expected: [0]')
+    pattern = "dhjalk"
+    text = "dhjalkjwqnnnannanaflkjdklfj"
+    bndm = BNDM(pattern)
+    print(f'Result: {bndm.find_all(text)}')
+
+    print('----------')
+
+    print("Manual evaluation: All Tests Pass")
+
+
+if __name__ == "__main__":
+    test_bndm()

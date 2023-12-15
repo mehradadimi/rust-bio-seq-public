@@ -1,0 +1,55 @@
+class MaxOp:
+    @staticmethod
+    def operation(t1: Tuple[int, int], t2: Tuple[int, int]) -> Tuple[int, int]:
+        return max(t1, t2)
+
+
+class FenwickTree:
+    tree: List[Tuple[int, int]]
+    Op: MaxOp
+
+    def __init__(self, length: int, Op: MaxOp):
+        self.tree = [(0, 0) for _ in range(length + 1)]
+        self.Op = Op
+
+    def get(self, idx: int) -> Tuple[int, int]:
+        idx += 1
+        result = (0, 0)
+        while idx > 0:
+            result = self.Op.operation(result, self.tree[idx])
+            idx -= idx & -idx
+        return result
+
+    def set(self, idx: int, val: Tuple[int, int]):
+        idx += 1
+        while idx < len(self.tree):
+            self.tree[idx] = self.Op.operation(self.tree[idx], val)
+            idx += idx & -idx
+
+
+def test_bit_tree():
+    bit = FenwickTree(10, MaxOp())
+
+    bit.set(0, (1, 0))
+    bit.set(1, (1, 1))
+    bit.set(2, (2, 2))
+    bit.set(3, (3, 3))
+    bit.set(4, (2, 4))
+    bit.set(5, (2, 5))
+    bit.set(6, (4, 6))
+    bit.set(7, (5, 7))
+
+    assert bit.get(0) == (1, 0)
+    assert bit.get(1) == (1, 1)
+    assert bit.get(2) == (2, 2)
+    assert bit.get(3) == (3, 3)
+    assert bit.get(4) == (3, 3)
+    assert bit.get(5) == (3, 3)
+    assert bit.get(6) == (4, 6)
+    assert bit.get(7) == (5, 7)
+
+    print("All Tests Passed")
+
+
+if __name__ == "__main__":
+    test_bit_tree()

@@ -1,0 +1,112 @@
+class BOM:
+    m: int
+    table: list[dict[str,int]]
+
+    def __init__(self, pattern: str):
+        self.m = len(pattern)
+        self.table = self.build_oracle(pattern)
+
+    @staticmethod 
+    def add_fallbacks(alphabet, current_state, table, suff):
+
+        if current_state == 0:
+            return
+
+        for letter in alphabet:
+            
+            if letter in table[current_state]:
+                continue
+
+            cmp_str = (letter + suff[current_state])[:-1]
+
+            for prev_state in range(current_state, 0, -1):
+                assert len(cmp_str) == len(suff[prev_state])
+
+                if suff[prev_state] == cmp_str:
+                    table[current_state][letter] = prev_state
+                    break
+
+                cmp_str = cmp_str[:-1]
+
+    def build_oracle(self, pattern: str):
+        alphabet = set(c for c in pattern)
+
+        table = [{} for _ in range(self.m+1)]
+        suff = [''] * (self.m+1)
+
+        curr_state = 1
+
+        r_pattern = list(reversed(pattern))
+        for index, c in enumerate(r_pattern):
+            
+            suff[curr_state] = ''.join(reversed(r_pattern[:index+1]))
+            table[curr_state-1][c] = curr_state
+
+            self.add_fallbacks(alphabet, curr_state-1, table, suff)
+
+            curr_state += 1
+
+        self.add_fallbacks(alphabet, curr_state-1, table, suff)
+        
+        return table
+
+    def find_all(self, text: str) -> list:
+        res = []
+        n = len(text)
+
+        for i in range(n - self.m + 1):  # Iterate over each position in the text
+            state = 0  # Start from the initial state
+
+            for j in range(self.m-1, -1, -1):  # Scan the window backward
+                char = text[i + j]
+
+                if char in self.table[state]:
+                    state = self.table[state][char]
+
+                    if state == self.m:  # Full pattern matched
+                        res.append(i)
+                        break
+
+                else:
+                    break  # No transition found for this character
+
+        return res
+
+
+def test_bom():
+    # Testing
+    print('Test 1')
+    print('-')
+    print('Expected: [7, 17]')
+    pattern = "GAAAA"
+    text = "ACGGCTAGAAAAGGCTAGAAAA"
+    bom = BOM(pattern)
+    print(f'Result: {bom.find_all(text)}')
+
+    print('----------')
+
+    print('Test 2')
+    print('-')
+    print('Expected: [8]')
+    pattern = "qnnnannan"
+    text = "dhjalkjwqnnnannanaflkjdklfj"
+    bom = BOM(pattern)
+    print(f'Result: {bom.find_all(text)}')
+
+    print('----------')
+
+    print('Test 3')
+    print('-')
+    print('Expected: [0]')
+    pattern = "dhjalk"
+    text = "dhjalkjwqnnnannanaflkjdklfj"
+    bom = BOM(pattern)
+    print(f'Result: {bom.find_all(text)}')
+
+    print('----------')
+
+    print("Manual evaluation: All Tests Pass")
+
+
+if __name__ == "__main__":
+    test_bom()

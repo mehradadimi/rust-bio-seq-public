@@ -1,0 +1,169 @@
+class Interval:
+    start: int
+    end: int
+
+    def __init__(self, start, end):
+        if start >= end:
+            raise ValueError("Interval must have a positive width")
+        self.start = start
+        self.end = end
+
+    def __repr__(self):
+        return f"Interval({self.start}, {self.end})"
+
+    def intersects(self, other):
+        return self.start < other.end and self.end > other.start
+
+    def __eq__(self, other: Interval) -> bool:
+        return self.start == other.start and self.end == other.end
+
+
+class Node:
+    interval: Interval
+    data: str
+    max: int
+    left: Optional[Node]
+    right: Optional[Node]
+    height: int
+
+    def __init__(self, interval, data):
+        self.interval = interval
+        self.data = data
+        self.max = interval.end
+        self.height = 1
+        self.left = None
+        self.right = None
+
+    def insert(self, interval, data):
+        if interval.start <= self.interval.start:
+            if self.left is not None:
+                self.left.insert(interval, data)
+
+            else:
+                self.left = Node(interval, data)
+
+        else:
+            if self.right is not None:
+                self.right.insert(interval, data)
+
+            else:
+                self.right = Node(interval, data)
+
+        self.update_height_and_max()
+        self.balance()
+
+    def update_height_and_max(self):
+        self.height = 1 + max(self.get_height(self.left), self.get_height(self.right))
+
+        self.max = max(
+            self.interval.end, self.get_max(self.left), self.get_max(self.right)
+        )
+
+    def balance_factor(self):
+        return self.get_height(self.left) - self.get_height(self.right)
+
+    def get_height(self, node):
+        return node.height if node is not None else 0
+
+    def get_max(self, node):
+        return node.max if node is not None else self.interval.end
+
+    def balance(self):
+        bf = self.balance_factor()
+
+        if bf > 1:
+            if self.left.balance_factor() < 0:
+                self.left.rotate_left()
+
+            self.rotate_right()
+
+        elif bf < -1:
+            if self.right.balance_factor() > 0:
+                self.right.rotate_right()
+
+            self.rotate_left()
+
+    def rotate_left(self):
+        new_root = self.right
+        self.right = new_root.left
+        new_root.left = self
+        self.update_height_and_max()
+        new_root.update_height_and_max()
+        return new_root
+
+    def rotate_right(self):
+        new_root = self.left
+        self.left = new_root.right
+        new_root.right = self
+        self.update_height_and_max()
+        new_root.update_height_and_max()
+        return new_root
+
+    def find_overlaps(self, interval) -> list[Node]:
+        result = []
+        self._find_overlaps_helper(interval, result)
+        return result
+
+    def _find_overlaps_helper(self, interval, result):
+        if self.left and interval.start < self.left.max:
+            self.left._find_overlaps_helper(interval, result)
+
+        if interval.intersects(self.interval):
+            result.append(self)
+
+        if self.right and interval.end > self.interval.start:
+            self.right._find_overlaps_helper(interval, result)
+
+
+class IntervalTree:
+    root: Optional[Node]
+
+    def __init__(self):
+        self.root = None
+
+    def insert(self, interval, data):
+        if self.root is None:
+            self.root = Node(interval, data)
+
+        else:
+            self.root.insert(interval, data)
+
+    def safe_find_overlaps(self, interval):
+        if self.root is not None:
+            return self.find_overlaps_helper(self.root, interval)
+
+        else:
+            return []
+
+    def find_overlaps_helper(self, node: Node, interval):
+        return node.find_overlaps(interval)
+
+    def find_overlaps_tree(self, interval):
+        return self.safe_find_overlaps(interval)
+
+
+def test_interval_tree():
+    tree = IntervalTree()
+    tree.insert(Interval(11, 20), "Range_1")
+    tree.insert(Interval(25, 30), "Range_2")
+
+    overlaps = tree.find_overlaps_tree(Interval(15, 25))
+
+    for node in overlaps:
+        assert (
+            node.interval.start == 11
+        ), f"Expected start 11, got {node.interval.start}"
+
+        assert node.interval.end == 20, f"Expected end 20, got {node.interval.end}"
+
+        assert node.interval == Interval(
+            11, 20
+        ), f"Expected interval Interval(11, 20), got {node.interval}"
+
+        assert node.data == "Range_1", f"Expected data 'Range_1', got {node.data}"
+
+        print("All Tests Passed")
+
+
+if __name__ == "__main__":
+    test_interval_tree()

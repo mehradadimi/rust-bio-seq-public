@@ -1,0 +1,121 @@
+class BitEnc:
+    storage: list[int]
+    width: int
+    mask: int
+    len: int
+    usable_bits_per_block: int
+
+    def __init__(self, width: int):
+        assert 1 <= width <= 8, "Only encoding widths up to 8 supported"
+        self.storage = []  # List of 32-bit integers
+        self.width = width
+        self.mask = (1 << width) - 1
+        self.len = 0
+        self.usable_bits_per_block = 32 - (32 % width)
+
+    def push(self, value: int):
+        block, bit = self.addr(self.len)
+
+        if bit == 0:
+            self.storage.append(0)
+
+        self.set_by_addr(block, bit, value)
+        self.len += 1
+
+    def push_values(self, n: int, value: int):
+        for _ in range(n):
+            self.push(value)
+
+    def set(self, i: int, value: int):
+        block, bit = self.addr(i)
+        self.set_by_addr(block, bit, value)
+
+    def get(self, i: int) -> int:
+        if i >= self.len:
+            return None
+
+        block, bit = self.addr(i)
+        return self.get_by_addr(block, bit)
+
+    def clear(self):
+        self.storage = []
+        self.len = 0
+
+    def iter(self):
+        return (self.get(i) for i in range(self.len))
+    
+    def nr_blocks(self) -> int:
+        return len(self.storage)
+
+    def nr_symbols(self) -> int:
+        return self.len
+
+    # Helper methods
+    def set_by_addr(self, block: int, bit: int, value: int):
+        mask = self.mask << bit
+        self.storage[block] |= mask
+        self.storage[block] ^= mask
+        self.storage[block] |= (value & self.mask) << bit
+
+    def get_by_addr(self, block: int, bit: int) -> int:
+        return (self.storage[block] >> bit) & self.mask
+
+    def addr(self, i: int) -> tuple[int, int]:
+        k = i * self.width
+        return (k // self.usable_bits_per_block, k % self.usable_bits_per_block)
+
+
+def test_bitenc():
+    bitenc = BitEnc(2)
+    bitenc.push(0)
+    bitenc.push(2)
+    bitenc.push(1)
+    values = list(bitenc.iter())
+    assert values == [0, 2, 1]
+    bitenc.set(1, 3)
+    values = list(bitenc.iter())
+    assert values == [0, 3, 1]
+
+
+def test_push_values():
+    bitenc = BitEnc(2)
+    bitenc.push_values(32, 0)
+    assert bitenc.storage == [0, 0]
+
+
+def test_push_values_edge_cases():
+    bitenc = BitEnc(7)
+    bitenc.push_values(5, 0b101010)
+    values = list(bitenc.iter())
+    assert values == [42, 42, 42, 42, 42]
+    assert bitenc.nr_blocks() == 2
+    assert bitenc.nr_symbols() == 5
+
+    bitenc.push_values(1, 23)
+    values = list(bitenc.iter())
+    assert values == [42, 42, 42, 42, 42, 23]
+    assert bitenc.nr_blocks() == 2
+    assert bitenc.nr_symbols() == 6
+
+    bitenc.push_values(12, 17)
+    values = list(bitenc.iter())
+    assert values == [42, 42, 42, 42, 42, 23, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17]
+    assert bitenc.nr_blocks() == 5
+    assert bitenc.nr_symbols() == 18
+
+
+def test_issue29():
+    for w in range(2, 9):
+        vec = BitEnc(w)
+
+        for i in range(1000):
+            vec.push(1)
+
+
+if __name__ == "__main__":
+    test_bitenc()
+    test_push_values()
+    test_push_values_edge_cases()
+    test_issue29()
+
+    print("All Tests Passed")

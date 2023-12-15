@@ -1,0 +1,283 @@
+class BTreeNode[T, V]:
+    items: List[Tuple[T, V]]
+    children: List[BTreeNode[T, V]]
+    t: int
+
+    def __init__(self: BTreeNode[T, V], t: int):
+        self.items = []
+        self.children = []
+        self.t = t
+
+    def is_leaf(self: BTreeNode[T, V]) -> bool:
+        return len(self.children) == 0
+    
+    def find_key(self, k):
+        idx = 0
+        while idx < len(self.items) and self.items[idx][0] < k:
+            idx += 1
+
+        return idx
+
+class BTree[T, V]:
+    root: BTreeNode[T, V]
+    t: int
+
+    def __init__(self: BTree[T, V], t: int):
+        self.root = BTreeNode[T, V](t)
+        self.t = t
+
+    def insert(self: BTree[T, V], key: T, value: V):
+        root = self.root
+
+        if len(root.items) == (2 * self.t) - 1:
+            temp = BTreeNode[T, V](self.t)
+            temp.children.append(self.root)
+            self._split_child(temp, 0)
+            self._insert_non_full(temp, key, value)
+            self.root = temp
+
+        else:
+            self._insert_non_full(root, key, value)
+
+    def _insert_non_full(self: BTree[T, V], node: BTreeNode[T, V], key: T, value: V):
+        i = len(node.items) - 1
+        if node.is_leaf():
+            node.items.append((key, value))
+            node.items.sort(key=lambda item: item[0])
+
+        else:
+            while i >= 0 and key < node.items[i][0]:
+                i -= 1
+
+            i += 1
+
+            if len(node.children[i].items) == (2 * self.t) - 1:
+                self._split_child(node, i)
+
+                if key > node.items[i][0]:
+                    i += 1
+
+            self._insert_non_full(node.children[i], key, value)
+
+    def _split_child(self: BTree[T, V], parent: BTreeNode[T, V], i: int):
+        t = self.t
+        node = parent.children[i]
+        new_node = BTreeNode[T, V](t)
+        parent.children.insert(i + 1, new_node)
+        new_node.items = node.items[t:]
+        node.items = node.items[:t-1]
+
+        if not node.is_leaf():
+            new_node.children = node.children[t:]
+            node.children = node.children[:t]
+
+    def search(self: BTree[T, V], key: T) -> Optional[V]:
+        return self._search_internal(key, self.root)
+
+    def _search_internal(self: BTree[T, V], key: T, node: Optional[BTreeNode[T, V]]) -> Optional[V]:
+        if node is None:
+            return None
+
+        i = 0
+
+        while i < len(node.items) and key > node.items[i][0]:
+            i += 1
+
+        if i < len(node.items) and key == node.items[i][0]:
+            return node.items[i][1]
+
+        if node.is_leaf():
+            return None
+
+        return self._search_internal(key, node.children[i])
+    
+    def _delete_internal(self, node, k):
+        idx = node.find_key(k)
+
+        if idx < len(node.items) and node.items[idx][0] == k:
+            if node.is_leaf():
+                del node.items[idx]
+
+            else:
+                self._delete_internal_node(node, k, idx)
+
+        else:
+            if node.is_leaf():
+                return False  # Key not found
+
+            flag = (idx == len(node.items))
+
+            if len(node.children[idx].items) < self.t:
+                self._fill(node, idx)
+
+            if flag and idx > len(node.items):
+                self._delete_internal(node.children[idx - 1], k)
+
+            else:
+                self._delete_internal(node.children[idx], k)
+
+        return True
+
+    def _delete_internal_node(self, node, k, idx):
+        if node.is_leaf():
+            del node.items[idx]
+
+        else:
+            if len(node.children[idx].items) >= self.t:
+                pred = self._get_pred(node, idx)
+                node.items[idx] = pred
+                self._delete_internal(node.children[idx], pred[0])
+
+            elif len(node.children[idx + 1].items) >= self.t:
+                succ = self._get_succ(node, idx)
+                node.items[idx] = succ
+                self._delete_internal(node.children[idx + 1], succ[0])
+
+            else:
+                self._merge(node, idx)
+                self._delete_internal(node.children[idx], k)
+
+    def _get_pred(self, node, idx):
+        cur = node.children[idx]
+        while not cur.is_leaf():
+            cur = cur.children[-1]
+
+        return cur.items[-1]
+
+    def _get_succ(self, node, idx):
+        cur = node.children[idx + 1]
+        while not cur.is_leaf():
+            cur = cur.children[0]
+
+        return cur.items[0]
+
+    def _fill(self, node, idx):
+        if idx != 0 and len(node.children[idx - 1].items) >= self.t:
+            self._borrow_from_prev(node, idx)
+
+        elif idx != len(node.items) and len(node.children[idx + 1].items) >= self.t:
+            self._borrow_from_next(node, idx)
+
+        else:
+            if idx != len(node.items):
+                self._merge(node, idx)
+
+            else:
+                self._merge(node, idx - 1)
+
+    def _borrow_from_prev(self, node, idx):
+        child = node.children[idx]
+        sibling = node.children[idx - 1]
+
+        child.items.insert(0, node.items[idx - 1])
+        node.items[idx - 1] = sibling.items.pop()
+
+        if not child.is_leaf():
+            child.children.insert(0, sibling.children.pop())
+
+    def _borrow_from_next(self, node, idx):
+        child = node.children[idx]
+        sibling = node.children[idx + 1]
+
+        child.items.append(node.items[idx])
+
+        node.items[idx] = sibling.items.pop(0)
+        if not child.is_leaf():
+            child.children.append(sibling.children.pop(0))
+
+    def _merge(self, node, idx):
+        child = node.children[idx]
+        sibling = node.children[idx + 1]
+        child.items.append(node.items.pop(idx))
+
+        for item in sibling.items:
+            child.items.append(item)
+
+        if not child.is_leaf():
+            for child in sibling.children:
+                child.children.append(child)
+
+        del node.children[idx + 1]
+
+
+class SmallInts:
+    smallints: List[int]
+    bigints: BTree[int, int]  # Using int for both key and value in the BTree
+    max_small_value: int
+
+    def __init__(self, max_small_value):
+        self.smallints = []
+        self.bigints = BTree(2)  # A B-tree with a small order
+        self.max_small_value = max_small_value
+
+    def push(self, value):
+        if value < self.max_small_value:
+            self.smallints.append(value)
+
+        else:
+            index = len(self.smallints)
+            self.bigints.insert(index, value)  # Insert index and value into the BTree
+            self.smallints.append(self.max_small_value)
+
+    def get(self, index):
+        if index < len(self.smallints):
+            value = self.smallints[index]
+
+            if value < self.max_small_value:
+                return value
+
+            else:
+                # Retrieve the large value from the BTree
+                return self.bigints.search(index)
+
+        else:
+            return None
+
+    def set(self, index, value):
+        if value < self.max_small_value:
+            self.smallints[index] = value
+
+        else:
+            self.smallints[index] = self.max_small_value
+
+            # Update or insert the value in the BTree
+            self.bigints.insert(index, value)
+
+    def iter(self):
+        for i in range(len(self.smallints)):
+            yield self.get(i)
+
+    def len(self):
+        return len(self.smallints)
+
+    def is_empty(self):
+        return len(self.smallints) == 0
+
+
+def test_smallints():
+    smallints = SmallInts(256)
+    smallints.push(3)
+    smallints.push(4)
+    smallints.push(255)
+    smallints.push(305093)  # This is a large integer and will be stored in the BTree
+
+    assert smallints.get(0) == 3  # Expected output: 3
+    assert smallints.get(3) == 305093  # Expected output: 305093
+
+    smallints.set(0, 50000)  # Update the first element to a large integer
+
+    # Expected output: 50000, 4, 255, 305093
+    expected = [50000, 4, 255, 305093]
+    i = 0
+    for value in smallints.iter():
+        assert value == expected[i]
+        i += 1
+
+    print("All Tests Passed")
+
+
+if __name__ == "__main__":
+    test_smallints()
+
+
+

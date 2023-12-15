@@ -1,0 +1,212 @@
+from alphabet_rank_transform import Alphabet, RankTransform
+import sys
+
+class Interval:
+    start: int
+    stop: int
+
+    def __init__(self, start: int = 0, stop: int = 0):
+        self.start = start
+        self.stop = stop
+
+    def get(self, text: str) -> str:
+        return text[self.start:self.stop]
+    
+    def __str__(self) -> str:
+        return f"Interval(start={self.start}, stop={self.stop})"
+
+
+class Match:
+    pattern: Interval
+    text: Interval
+    count: int
+
+    def __init__(self, pattern: Interval = None, text: Interval = None, count: int = 0):
+        self.pattern = pattern
+        self.text = text
+        self.count = count
+    
+    def __eq__(self, other: Match) -> bool:
+        return self.count == other.count
+    
+    def __lt__(self, other: Match) -> bool:
+        return self.count < other.count
+    
+    def __le__(self, other: Match) -> bool:
+        return self.count <= other.count
+    
+    def __gt__(self, other: Match) -> bool:
+        return self.count > other.count
+    
+    def __ge__(self, other: Match) -> bool:
+        return self.count >= other.count
+    
+    def __str__(self) -> str:
+        return f"Match(pattern={self.pattern}, text={self.text}, count={self.count})"
+
+
+class ExactMatch:
+    pattern: Interval
+    text: Interval
+
+    def __init__(self, pattern: Interval, text: Interval):
+        self.pattern = pattern
+        self.text = text
+
+    def __eq__(self, other: ExactMatch) -> bool:
+        return self.pattern == other.pattern and self.text == other.text
+
+    def __lt__(self, other: ExactMatch) -> bool:
+        return (self.pattern, self.text) < (other.pattern, other.text)
+
+    def __le__(self, other: ExactMatch) -> bool:
+        return (self.pattern, self.text) <= (other.pattern, other.text)
+
+    def __gt__(self, other: ExactMatch) -> bool:
+        return (self.pattern, self.text) > (other.pattern, other.text)
+
+    def __ge__(self, other: ExactMatch) -> bool:
+        return (self.pattern, self.text) >= (other.pattern, other.text)
+
+    def __str__(self) -> str:
+        return f"ExactMatch(pattern={self.pattern}, text={self.text})"
+    
+
+class QGramIndex:
+    q: int
+    address: list[int]
+    pos: list[int]
+    ranks: RankTransform
+
+    def __init__(self, q: int, text: str, alphabet: Alphabet):
+        self.q = q
+        self.ranks = RankTransform(alphabet)
+        self.address, self.pos = self.with_max_count(text, alphabet, sys.maxsize)
+
+    # Flawed - Can't test
+    def with_max_count(self, text: str, alphabet: Alphabet, max_count: int) -> tuple[list[int], list[int]]:
+
+        qgram_count = alphabet.len() ** self.q
+        address = [0] * (qgram_count + 1)
+        qgram_positions = {}
+
+        for i, qgram in enumerate(self.ranks.qgrams(self.q, text[:-1])):
+
+            if qgram not in qgram_positions:
+                qgram_positions[qgram] = []
+            
+            qgram_positions[qgram].append(i)
+
+
+        for i, qgram in enumerate(self.ranks.qgrams(self.q, text[:-1])):
+            address[i+1] = address[i]
+
+            if qgram in qgram_positions and len(qgram_positions[qgram]) <= max_count:
+                address[i+1] += len(qgram_positions[qgram])
+
+
+        pos = [0] * address[-1]
+        for qgram, positions in qgram_positions.items():
+            if len(positions) <= max_count:
+                start = address[positions[0]]
+                pos[start:start + len(positions)] = positions
+
+        return address, pos
+
+    def qgram_matches(self, qgram: int) -> list[int]:
+        return self.pos[self.address[qgram]:self.address[qgram + 1]]
+
+    def matches(self, pattern: str, min_count: int) -> list[Match]:
+        q = self.q
+        diagonals = {}
+
+        for i in range(len(pattern) - q + 1):
+            qgram = pattern[i:i+q]
+
+            qgram_rank = self.ranks.transform(qgram)
+
+            for p in self.qgram_matches(qgram_rank):
+                diagonal = p - i
+
+                if diagonal not in diagonals:
+                    diagonals[diagonal] = Match(Interval(i, i + q), Interval(p, p + q), 1)
+
+                else:
+                    m = diagonals[diagonal]
+                    m.pattern.stop = i + q
+                    m.text.stop = p + q
+                    m.count += 1
+
+        return [m for m in diagonals.values() if m.count >= min_count]
+
+    def exact_matches(self, pattern: str) -> list[ExactMatch]:
+        q = self.q
+        diagonals = {}
+        matches = []
+
+        for i in range(len(pattern) - q + 1):
+            qgram = pattern[i:i+q]
+            qgram_rank = self.ranks.transform(qgram)
+
+            for p in self.qgram_matches(qgram_rank):
+                diagonal = p - i
+
+                if diagonal not in diagonals:
+                    diagonals[diagonal] = ExactMatch(Interval(i, i + q), Interval(p, p + q))
+
+                else:
+                    m = diagonals[diagonal]
+
+                    if m.pattern.stop - q + 1 != i:
+                        # discontinue match
+                        matches.append(m)
+                        # start new match
+                        diagonals[diagonal] = ExactMatch(Interval(i, i + q), Interval(p, p + q))
+
+                    m.pattern.stop = i + q
+                    m.text.stop = p + q
+
+        matches.extend(diagonals.values())
+        return matches
+    
+
+def test_qgram_index():
+    # Setup
+    text = "ACGGCTGAGATGAT"
+    alphabet = Alphabet("ACGT")
+
+    # Test qgram_matches
+    qgram_index = QGramIndex(3, text, alphabet)
+    qgram = qgram_index.ranks.transform("TGA")
+    assert qgram_index.qgram_matches(qgram) == [5, 10], "Test qgram_matches failed"
+
+    # Test qgram_with_max_count
+    qgram_index = QGramIndex(3, text, alphabet)
+    qgram = qgram_index.ranks.transform("TGA")
+    assert qgram_index.qgram_matches(qgram) == [], "Test qgram_with_max_count failed"
+
+    # Test qgram_sizeof_pos
+    qgram_index = QGramIndex(3, text, alphabet)
+    qgram = qgram_index.ranks.transform("AAA")
+    assert qgram_index.qgram_matches(qgram) == [0, 1, 2], "Test qgram_sizeof_pos failed"
+
+    # Test matches
+    pattern = "GCTG"
+    matches = qgram_index.matches(pattern, 1)
+    expected_match = Match(Interval(0, 4), Interval(3, 7), 2)
+    assert matches == [expected_match], "Test matches failed"
+
+    # Test exact_matches
+    pattern = "GCTGA"
+    exact_matches = qgram_index.exact_matches(pattern)
+
+    assert len(exact_matches) == 2, "Test exact_matches failed"
+
+    for m in exact_matches:
+        assert m.pattern.get(pattern) == m.text.get(text), "Exact match verification failed"
+
+    print("All tests passed.")
+
+
+if __name__ == "__main__":
+    test_qgram_index()

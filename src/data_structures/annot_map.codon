@@ -1,0 +1,98 @@
+from bio import *
+from collections import deque
+from typing import List, Tuple, Dict
+
+
+class ReqStrand:
+    Forward = 1
+    Reverse = -1
+
+
+class Contig:
+    chromosome: str
+    start: int
+    length: int
+    req_strand: int
+
+    def __init__(self, chromosome: str, start: int, length: int, req_strand: int):
+        self.chromosome = chromosome
+        self.start = start
+        self.length = length
+        self.req_strand = req_strand
+
+    def overlaps(self, other: Contig) -> bool:
+        return self.chromosome == other.chromosome and \
+               self.start < other.start + other.length and \
+               other.start < self.start + self.length
+
+
+class AnnotMap:
+    annotations: Dict[str, List[Tuple[Contig, str]]]
+
+    def __init__(self):
+        self.annotations = {}
+
+    def insert_at(self, data: str, contig: Contig):
+        if contig.chromosome not in self.annotations:
+            self.annotations[contig.chromosome] = []
+        self.annotations[contig.chromosome].append((contig, data))
+
+    def find(self, query: Contig) -> List[str]:
+        hits = []
+        if query.chromosome in self.annotations:
+            for contig, data in self.annotations[query.chromosome]:
+                if contig.overlaps(query):
+                    hits.append(data)
+        return hits
+
+
+def test_annot_map():
+    genes = AnnotMap()
+
+    # Test 1: Insert and find a single annotation
+    tma22 = Contig("chrX", 461829, 462426 - 461829, ReqStrand.Forward)
+    genes.insert_at("TMA22", tma22)
+    query = Contig("chrX", 462400, 100, ReqStrand.Forward)
+    hits = genes.find(query)
+    assert hits == ["TMA22"], "Test 1 Failed"
+
+    # Test 2: Insert and find another annotation
+    tma19 = Contig("chrXI", 334412, 334916 - 334412, ReqStrand.Reverse)
+    genes.insert_at("TMA19", tma19)
+    query = Contig("chrXI", 334400, 100, ReqStrand.Forward)
+    hits = genes.find(query)
+    assert hits == ["TMA19"], "Test 2 Failed"
+
+    # Test 3: No overlap with existing annotations
+    query = Contig("chrX", 461729, 100, ReqStrand.Forward)
+    hits = genes.find(query)
+    assert hits == [], "Test 3 Failed"
+
+    # Test 4: Multiple annotations, overlapping and non-overlapping
+    genes.insert_at("GeneA", Contig("chr01", 1000, 1000, ReqStrand.Forward))
+    genes.insert_at("GeneB", Contig("chr01", 1300, 1000, ReqStrand.Forward))
+    genes.insert_at("GeneC", Contig("chr01", 1700, 1000, ReqStrand.Forward))
+    genes.insert_at("GeneD", Contig("chr01", 2200, 1000, ReqStrand.Forward))
+
+    query = Contig("chr01", 1050, 100, ReqStrand.Forward)
+    hits = genes.find(query)
+    assert sorted(hits) == ["GeneA"], "Test 4 Failed - one overlap"
+
+    query = Contig("chr01", 1450, 100, ReqStrand.Forward)
+    hits = genes.find(query)
+    assert sorted(hits) == ["GeneA", "GeneB"], "Test 4 Failed - two overlaps"
+
+    query = Contig("chr01", 1850, 100, ReqStrand.Forward)
+    hits = genes.find(query)
+    assert sorted(hits) == ["GeneA", "GeneB", "GeneC"], "Test 4 Failed - three overlaps"
+
+    query = Contig("chr01", 2250, 100, ReqStrand.Forward)
+    hits = genes.find(query)
+    assert sorted(hits) == ["GeneB", "GeneC", "GeneD"], "Test 4 Failed - another three overlaps"
+
+    print("All tests passed successfully.")
+
+
+if __name__ == "__main__":
+    # Run the test function
+    test_annot_map()

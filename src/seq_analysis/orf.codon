@@ -1,0 +1,109 @@
+from bio import *
+from collections import deque
+
+
+class State:
+    start_pos: list[list[int]]
+    codon: list[int]
+
+    def __init__(self):
+        self.start_pos = [[] for _ in range(3)]
+        self.codon = []
+
+
+class Orf:
+    start: int
+    end: int
+    offset: int
+
+    def __init__(self, start: int, end: int, offset: int):
+        self.start = start
+        self.end = end
+        self.offset = offset
+
+
+class Finder:
+    start_codons: list[list[int]]
+    stop_codons: list[list[int]]
+    min_len: int
+
+    def __init__(self, start_codons: list[str], stop_codons: list[str], min_len: int):
+        self.start_codons = [[ord(nuc) for nuc in codon] for codon in start_codons]
+        self.stop_codons = [[ord(nuc) for nuc in codon] for codon in stop_codons]
+        self.min_len = min_len
+
+    def find_all(self, seq: str) -> list[Orf]:
+        state = State()
+        results = []
+
+        for index, nuc in enumerate(seq):
+            if len(state.codon) >= 3:
+                state.codon.pop(0)
+
+            state.codon.append(ord(nuc))
+            offset = (index + 1) % 3
+
+            if state.codon in self.start_codons:
+                state.start_pos[offset].append(index)
+
+            if not state.start_pos[offset]:
+                continue
+
+            if state.codon in self.stop_codons:
+                for start_pos in state.start_pos[offset]:
+                    if index + 1 - start_pos > self.min_len:
+                        results.append(Orf(start_pos - 2, index + 1, offset))
+
+                state.start_pos[offset] = []
+
+        return results
+
+
+# Test case functions
+def test_no_orf():
+    finder = Finder(["ATG"], ["TGA", "TAG", "TAA"], 5)
+    sequence = "ACGGCTAGAAAAGGCTAGAAAA"
+    assert len(finder.find_all(sequence)) == 0
+
+
+def test_one_orf_no_offset():
+    finder = Finder(["ATG"], ["TGA", "TAG", "TAA"], 5)
+    sequence = "GGGATGGGGTGAGGG"
+    orfs = finder.find_all(sequence)
+    assert len(orfs) == 1 and orfs[0].start == 3 and orfs[0].end == 12 and orfs[0].offset == 0
+
+
+def test_one_orf_with_offset():
+    finder = Finder(["ATG"], ["TGA", "TAG", "TAA"], 5)
+    sequence = "AGGGATGGGGTGAGGG"
+    orfs = finder.find_all(sequence)
+    assert len(orfs) == 1 and orfs[0].start == 4 and orfs[0].end == 13 and orfs[0].offset == 1
+
+
+def test_two_orfs_different_offsets():
+    finder = Finder(["ATG"], ["TGA", "TAG", "TAA"], 5)
+    sequence = "ATGGGGTGAGGGGGATGGAAAAATAAG"
+    orfs = finder.find_all(sequence)
+    assert len(orfs) == 2 and orfs[0].start == 0 and orfs[0].end == 9 and orfs[0].offset == 0 and \
+           orfs[1].start == 14 and orfs[1].end == 26 and orfs[1].offset == 2
+
+
+def test_three_nested_and_offset_orfs():
+    finder = Finder(["ATG"], ["TGA", "TAG", "TAA"], 5)
+    sequence = "ATGGGGATGGGGGGATGGAAAAATAAGTAG"
+    orfs = finder.find_all(sequence)
+    assert len(orfs) == 3 and \
+           orfs[0].start == 14 and orfs[0].end == 26 and orfs[0].offset == 2 and \
+           orfs[1].start == 0 and orfs[1].end == 30 and orfs[1].offset == 0 and \
+           orfs[2].start == 6 and orfs[2].end == 30 and orfs[2].offset == 0
+
+
+if __name__ == "__main__":
+    # Run test cases
+    test_no_orf()
+    test_one_orf_no_offset()
+    test_one_orf_with_offset()
+    test_two_orfs_different_offsets()
+    test_three_nested_and_offset_orfs()
+
+    print("All tests passed successfully!")

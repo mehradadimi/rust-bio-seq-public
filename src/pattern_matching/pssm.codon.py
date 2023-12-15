@@ -1,0 +1,600 @@
+from bio import *
+import math
+
+
+# Constants
+DEF_PSEUDO: float = 0.5
+EPSILON: float = 1e-5
+INVALID_MONO: int = 255
+
+
+class ScoredPos:
+    """
+    Represents motif score & location of match.
+    """
+    loc: int
+    sum: float
+    scores: list[float]
+
+    def __init__(self, loc=0, sum=float('-inf'), scores=[]):
+        self.loc = loc
+        self.sum = sum
+        self.scores = scores
+
+
+class DNAMotif():
+    """
+    Position-specific scoring matrix for DNA sequences.
+    """
+    LK: list[int]
+    MONOS: str
+    MONO_CT: int
+
+    scores: list[list[float]]
+    min_score: float
+    max_score: float
+
+    def __init__(self, seqs: list[str], pseudos=None):
+        self.LK = [INVALID_MONO for _ in range(127)]
+        self.MONOS = "ATGC"
+        self.MONO_CT = 4
+        
+        for index, letter in enumerate(list(self.MONOS)):
+            self.LK[ord(letter)] = index
+
+        self.scores = self.seqs_to_weights(seqs, pseudos)
+        
+        self.min_score = 0.0
+        self.max_score = 0.0
+
+        self.normalize()
+        self.calc_minmax()
+
+    def lookup(self, mono: int) -> int:
+        """
+        Returns the index of given monomer in the scores matrix using the lookup table LK.
+        """
+        if mono >= 127:
+            print(f'Invalid Monomer Error - ({mono})')
+            raise Exception()
+
+        idx = self.LK[mono]
+        if str(idx) == str(INVALID_MONO):
+            print(f'Invalid Monomer Error - ({mono})')
+            raise Exception()
+
+        return idx
+    
+    def seqs_to_weights(self, seqs: list[str], _pseudos=None) -> list[list[float]]:
+        """
+        Converts sequences to a weight matrix.
+        """
+        p1 = [DEF_PSEUDO for _ in range(self.MONO_CT)]
+        pseudos = _pseudos if _pseudos is not None else p1
+
+        # Error handling
+        if len(pseudos) != self.MONO_CT:
+            print(f'Invalid Pseudos Error - (expected: {self.MONO_CT}, received: {len(pseudos)})')
+            raise Exception()
+        
+        if not seqs:
+            print("Empty Motif Error")
+            raise Exception()
+
+        seqlen = len(seqs[0])
+        counts = [[0.0 for _ in range(self.MONO_CT)] for _ in range(seqlen)]
+
+        # Initialize counts with pseudocounts
+        for i in range(seqlen):
+            for base in range(self.MONO_CT):
+                counts[i][base] = pseudos[base]
+
+        # Populate counts based on sequences
+        for seq in seqs:
+            if len(seq) != seqlen:
+                print("Inconsistent Len Error")
+                raise Exception()
+
+            for idx, base in enumerate(seq):
+                pos = self.lookup(ord(base))
+
+                if str(pos) == str(INVALID_MONO):
+                    print(f"Invalid Monomer Error - ({base})")
+                    raise Exception()
+                
+                counts[idx][pos] += 1.0
+
+        return counts
+    
+    def normalize(self):
+        """
+        Normalize the scores matrix.
+        """
+        for i in range(len(self)):
+            total = sum(self.scores[i])
+            self.scores[i] = [score / total for score in self.scores[i]]
+
+    def calc_minmax(self):
+        """
+        Calculate the minimum and maximum scores for the motif.
+        """
+        self.min_score = sum(min(row) for row in self.scores)
+        self.max_score = sum(max(row) for row in self.scores)
+
+    @staticmethod
+    def rev_lk(idx: int) -> str:
+        """
+        Returns the monomer associated with the given index.
+        """
+        match idx:
+            case 0: return 'A'
+            case 1: return 'T'
+            case 2: return 'G'
+            case 3: return 'C'
+            case _: return str(INVALID_MONO)
+
+    def __len__(self) -> int:
+        return len(self.scores)
+
+    def get_scores(self) -> list[list[float]]:
+        return self.scores
+
+    def get_min_score(self) -> float:
+        return self.min_score
+
+    def get_max_score(self) -> float:
+        return self.max_score
+
+    @staticmethod
+    def get_bits() -> float:
+        return 2.0
+    
+    def is_empty(self) -> bool:
+        return len(self) == 0
+    
+    def degenerate_consensus(self) -> str:
+        """
+        Returns a representation of the motif using ambiguous codes.
+        """
+        def two(a: str, b: str) -> str:
+            ab = sorted([a, b])
+
+            match ab:
+                case ['A', 'C']: return 'M'
+                case ['A', 'G']: return 'R'
+                case ['A', 'T']: return 'W'
+                case ['C', 'G']: return 'S'
+                case ['C', 'T']: return 'Y'
+                case ['G', 'T']: return 'K'
+                case _: ValueError("Invalid base combination")
+
+        len_motif = len(self)
+        res = ""
+
+        for pos in range(len_motif):
+            fracs = [(self.scores[pos][b], self.MONOS[b]) for b in range(self.MONO_CT)]
+            fracs.sort(reverse=True)
+
+            if fracs[0][0] > 0.5 and fracs[0][0] > 2.0 * fracs[1][0]:
+                res += fracs[0][1]
+
+            elif 4.0 * (fracs[0][0] + fracs[1][0]) > 3.0:
+                res += two(fracs[0][1], fracs[1][1])
+
+            elif fracs[3][0] < EPSILON:
+
+                base = fracs[3][1]
+
+                match base:
+                    case 'T': res += 'V'
+                    case 'G': res += 'H'
+                    case 'C': res += 'D'
+                    case 'A': res += 'B'
+                    case _: raise ValueError("Invalid base")
+                    
+            else:
+                res += 'N'
+
+        return res
+    
+    def raw_score(self, seq: str) -> tuple[int, float, list[float]]:
+        """
+        Calculates the unnormalized sum of matching bases for a query sequence.
+        """
+        pssm_len = len(self)
+        best_start = 0
+        best_score = float('-inf')
+        best_m = []
+
+        scores = self.get_scores()
+
+        for start in range(len(seq) - pssm_len + 1):
+            m = []
+
+            for i in range(pssm_len):
+                pos = self.lookup(ord(seq[start + i]))
+
+                if str(pos) == str(INVALID_MONO):
+                    print(f'Invalid Monomer Error - ({seq[start + i]})')
+                    raise Exception()
+                
+                m.append(scores[i][pos])
+
+            tot = sum(m)
+            if tot > best_score:
+                best_score = tot
+                best_start = start
+                best_m = m
+
+        return (best_start, best_score, best_m)
+
+    def score(self, seq: str) -> ScoredPos:
+        """
+        Calculates the best match for a query sequence.
+        """
+        pssm_len = len(self)
+
+        if len(seq) < pssm_len:
+            print(f'Query Too Short Error - (motif len: {pssm_len}, query len: {len(seq)})')
+            raise Exception()
+
+        min_score = self.get_min_score()
+        max_score = self.get_max_score()
+
+        if max_score - min_score == 0:
+            print("Null Motif Error")
+            raise Exception()
+        
+        best_start, best_raw_score, best_m = self.raw_score(seq)
+        normalized_score = (best_raw_score - min_score) / (max_score - min_score)
+
+        return ScoredPos(loc=best_start, sum=normalized_score, scores=best_m)
+
+    def info_content(self) -> float:
+        """
+        Calculates the information content of the motif.
+        """
+        def entropy(probs: list[float]) -> float:
+            return sum([-p * math.log2(p) if p > 0 else 0.0 for p in probs])
+
+        bits = self.get_bits()
+        scores = self.get_scores()
+        total_info_content = 0.0
+
+        for row in scores:
+            total_info_content += bits - entropy(row)
+
+        return total_info_content
+
+
+class ProtMotif():
+    """
+    Position-specific scoring matrix for Prot sequences.
+    """
+    LK: list[int]
+    MONOS: str
+    MONO_CT: int
+
+    scores: list[list[float]]
+    min_score: float
+    max_score: float
+
+    def __init__(self, seqs: list[str], pseudos=None):
+        self.LK = [INVALID_MONO for _ in range(127)]
+        self.MONOS = "ARNDCEQGHILKMFPSTWYV"
+        self.MONO_CT = 20
+        
+        for index, letter in enumerate(list(self.MONOS)):
+            self.LK[ord(letter)] = index
+
+        self.scores = self.seqs_to_weights(seqs, pseudos)
+        
+        self.min_score = 0.0
+        self.max_score = 0.0
+
+        self.normalize()
+        self.calc_minmax()
+
+    def lookup(self, mono: int) -> int:
+        """
+        Returns the index of given monomer in the scores matrix using the lookup table LK.
+        """
+        if mono >= 127:
+            print(f'Invalid Monomer Error - ({mono})')
+            raise Exception()
+
+        idx = self.LK[mono]
+        if str(idx) == str(INVALID_MONO):
+            print(f'Invalid Monomer Error - ({mono})')
+            raise Exception()
+
+        return idx
+    
+    def seqs_to_weights(self, seqs: list[str], _pseudos=None) -> list[list[float]]:
+        """
+        Converts sequences to a weight matrix.
+        """
+        p1 = [DEF_PSEUDO for _ in range(self.MONO_CT)]
+        pseudos = _pseudos if _pseudos is not None else p1
+
+        # Error handling
+        if len(pseudos) != self.MONO_CT:
+            print(f'Invalid Pseudos Error - (expected: {self.MONO_CT}, received: {len(pseudos)})')
+            raise Exception()
+        
+        if not seqs:
+            print("Empty Motif Error")
+            raise Exception()
+
+        seqlen = len(seqs[0])
+        counts = [[0.0 for _ in range(self.MONO_CT)] for _ in range(seqlen)]
+
+        # Initialize counts with pseudocounts
+        for i in range(seqlen):
+            for base in range(self.MONO_CT):
+                counts[i][base] = pseudos[base]
+
+        # Populate counts based on sequences
+        for seq in seqs:
+            if len(seq) != seqlen:
+                print("Inconsistent Len Error")
+                raise Exception()
+
+            for idx, base in enumerate(seq):
+                pos = self.lookup(ord(base))
+
+                if str(pos) == str(INVALID_MONO):
+                    print(f"Invalid Monomer Error - ({base})")
+                    raise Exception()
+                
+                counts[idx][pos] += 1.0
+
+        return counts
+    
+    def normalize(self):
+        """
+        Normalize the scores matrix.
+        """
+        for i in range(len(self)):
+            total = sum(self.scores[i])
+            self.scores[i] = [score / total for score in self.scores[i]]
+
+    def calc_minmax(self):
+        """
+        Calculate the minimum and maximum scores for the motif.
+        """
+        self.min_score = sum(min(row) for row in self.scores)
+        self.max_score = sum(max(row) for row in self.scores)
+
+    def rev_lk(self, idx: int) -> str:
+        """
+        Returns the amino acid associated with the given index.
+        """
+        if idx >= self.MONO_CT:
+            return str(INVALID_MONO)
+        else:
+            return self.MONOS[idx]
+        
+    def __len__(self) -> int:
+        return len(self.scores)
+
+    def get_scores(self) -> list[list[float]]:
+        return self.scores
+
+    def get_min_score(self) -> float:
+        return self.min_score
+
+    def get_max_score(self) -> float:
+        return self.max_score
+
+    @staticmethod
+    def get_bits() -> float:
+        return math.log2(20)
+    
+    def is_empty(self) -> bool:
+        return len(self) == 0
+    
+    def degenerate_consensus(self) -> str:
+        """
+        Calculates the degenerate consensus sequence for the motif.
+        """
+        len_motif = len(self)
+        consensus = ""
+
+        for pos in range(len_motif):
+            # Get frequencies and corresponding amino acid indices
+            fracs = [(self.scores[pos][i], i) for i in range(self.MONO_CT)]
+            # Sort in reverse order (highest frequency first)
+            fracs.sort(key=lambda x: x[0], reverse=True)
+
+            # Determine the consensus amino acid or 'X'
+            if fracs[0][0] > 0.5 and fracs[0][0] > 2.0 * fracs[1][0]:
+                consensus += self.MONOS[fracs[0][1]]
+            else:
+                consensus += 'X'
+
+        return consensus
+    
+    def raw_score(self, seq: str) -> tuple[int, float, list[float]]:
+        """
+        Calculates the unnormalized sum of matching bases for a query sequence.
+        """
+        pssm_len = len(self)
+        best_start = 0
+        best_score = float('-inf')
+        best_m = []
+
+        scores = self.get_scores()
+
+        for start in range(len(seq) - pssm_len + 1):
+            m = []
+
+            for i in range(pssm_len):
+                pos = self.lookup(ord(seq[start + i]))
+
+                if str(pos) == str(INVALID_MONO):
+                    print(f'Invalid Monomer Error - ({seq[start + i]})')
+                    raise Exception()
+                
+                m.append(scores[i][pos])
+
+            tot = sum(m)
+            if tot > best_score:
+                best_score = tot
+                best_start = start
+                best_m = m
+
+        return (best_start, best_score, best_m)
+
+    def score(self, seq: str) -> ScoredPos:
+        """
+        Calculates the best match for a query sequence.
+        """
+        pssm_len = len(self)
+
+        if len(seq) < pssm_len:
+            print(f'Query Too Short Error - (motif len: {pssm_len}, query len: {len(seq)})')
+            raise Exception()
+
+        min_score = self.get_min_score()
+        max_score = self.get_max_score()
+
+        if max_score - min_score == 0:
+            print("Null Motif Error")
+            raise Exception()
+        
+        best_start, best_raw_score, best_m = self.raw_score(seq)
+        normalized_score = (best_raw_score - min_score) / (max_score - min_score)
+
+        return ScoredPos(loc=best_start, sum=normalized_score, scores=best_m)
+
+    def info_content(self) -> float:
+        """
+        Calculates the information content of the motif.
+        """
+        def entropy(probs: list[float]) -> float:
+            return sum([-p * math.log2(p) if p > 0 else 0.0 for p in probs])
+
+        bits = self.get_bits()
+        scores = self.get_scores()
+        total_info_content = 0.0
+
+        for row in scores:
+            total_info_content += bits - entropy(row)
+
+        return total_info_content
+
+
+def test_dna_motif():
+    def assert_equal_lists(list1, list2):
+        assert len(list1) == len(list2) and all([a == b for a, b in zip(list1, list2)])
+
+    def simple_pssm():
+        pssm = DNAMotif(["AAAA", "TTTT", "GGGG", "CCCC"], None)
+        expected_scores = [[0.25 for _ in range(4)] for _ in range(4)]
+        assert_equal_lists(pssm.get_scores(), expected_scores)
+
+    def find_motif():
+        pssm = DNAMotif(["ATGC"], None)
+        scored_pos = pssm.score("GGGGATGCGGGG")
+
+        assert scored_pos.loc == 4 and abs(scored_pos.sum - 1.0) <= EPSILON
+
+    def test_info_content():
+        pssm = DNAMotif(["AAAA"], [0.0, 0.0, 0.0, 0.0])
+        assert abs(pssm.info_content() - 8.0) <= EPSILON
+
+    def test_mono_err():
+        pssm = DNAMotif(["ATGC"], None)
+        try:
+            pssm.score("AAAAXAAAAAAAAA")
+            assert False  # Should not reach this point
+        except Exception:
+            assert True
+
+    def test_inconsist_err():
+        try:
+            DNAMotif(["AAAA", "TTTT", "C"], [0.0, 0.0, 0.0, 0.0])
+            assert False  # Should not reach this point
+        except Exception:
+            assert True
+
+    def test_degenerate_consensus_same_bases():
+        pssm = DNAMotif(["ATGC", "ATGC"], [0.0, 0.0, 0.0, 0.0])
+        assert_equal_lists(pssm.degenerate_consensus(), "ATGC")
+
+    def test_degenerate_consensus_two_bases():
+        pssm = DNAMotif(["AAACCG", "CGTGTT"], [0.0, 0.0, 0.0, 0.0])
+        assert_equal_lists(pssm.degenerate_consensus(), "MRWSYK")
+
+    def test_degenerate_consensus_three_bases():
+        pssm = DNAMotif(["AAAC", "CCGG", "GTTT"], [0.0, 0.0, 0.0, 0.0])
+        assert_equal_lists(pssm.degenerate_consensus(), "VHDB")
+
+    def test_degenerate_consensus_n():
+        pssm = DNAMotif(["AAAA", "GGGG", "CCCC", "TTTT"], None)
+        assert_equal_lists(pssm.degenerate_consensus(), "NNNN")
+
+    # Run all test functions
+    simple_pssm()
+    find_motif()
+    test_info_content()
+    test_mono_err()
+    test_inconsist_err()
+    test_degenerate_consensus_same_bases()
+    test_degenerate_consensus_two_bases()
+    test_degenerate_consensus_three_bases()
+    test_degenerate_consensus_n()
+
+    print("All DNA Motif tests passed.")
+
+
+def test_prot_motif():
+    def test_info_content():
+        pssm = ProtMotif(["AAAA"], pseudos=[0.0] * 20)
+        assert abs(pssm.info_content() - pssm.get_bits() * 4.0) <= EPSILON
+
+    def test_scoring():
+        pssm = ProtMotif(["ARND"], pseudos=[0.81] + [0.01] * 19)
+        scored_pos = pssm.score("AAAAARNDAAA")
+        assert scored_pos.loc == 4  # Start position of best match
+
+    def test_mono_err():
+        pssm = ProtMotif(["ARGN"])
+        try:
+            pssm.score("AAAABAAAAAAAAA")
+            assert False  # Should not reach here
+        except Exception:
+            assert True  # Expected an error
+
+    def test_inconsist_err():
+        try:
+            ProtMotif(["NNNNN", "RRRRR", "C"], pseudos=[0.0] * 20)
+            assert False  # Should not reach here
+        except Exception:
+            assert True  # Expected an error
+
+    def test_degenerate_consensus_same_bases():
+        pssm = ProtMotif(["QVTYNDSA", "QVTYNDSA"], pseudos=[0.0] * 20)
+        assert pssm.degenerate_consensus() == "QVTYNDSA"
+
+    def test_degenerate_consensus_x():
+        pssm = ProtMotif(["QVTYNDSA", "ASDNYTVQ"], pseudos=[0.0] * 20)
+        assert pssm.degenerate_consensus() == "XXXXXXXX"
+
+    # Run all tests
+    test_info_content()
+    test_scoring()
+    test_mono_err()
+    test_inconsist_err()
+    test_degenerate_consensus_same_bases()
+    test_degenerate_consensus_x()
+
+    print("All Protein Motif tests passed.")
+
+
+if __name__ == "__main__":
+    # Call the test functions
+    test_dna_motif()
+    print('-----')
+    test_prot_motif()
